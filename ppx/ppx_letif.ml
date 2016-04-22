@@ -69,6 +69,25 @@ let bindings_as_pattern vbs loc =
   let match_expr  = no_attr_expr (mk_match_expression rhs) loc in
   matched_pat, match_expr
 
+let rec unmatched_case_needed { ppat_desc } = match ppat_desc with
+  | Ppat_any
+  | Ppat_var _ ->
+    false
+  | Ppat_alias (p, _)
+  | Ppat_lazy p
+  | Ppat_constraint (p, _) ->
+    unmatched_case_needed p
+  | Ppat_tuple ps ->
+    List.for_all unmatched_case_needed ps
+  | Ppat_record (r, _) ->
+    List.(for_all unmatched_case_needed (map snd r))
+  | Ppat_construct _ ->
+    (* to be safier, we force to put the unmatched case. *)
+    true
+  | _ ->
+    true
+
+
 let make_expression else_clause expr loc =
   match expr.pexp_desc with
   | Pexp_let (Nonrecursive, vbs, body) ->
@@ -79,7 +98,11 @@ let make_expression else_clause expr loc =
       | Some pstr -> extract_expression pstr
     in
     let unmatched_case = mk_case_no_guard (p_any loc) unmatched_expr in
-    { pexp_desc = Pexp_match (match_expr, [matched_case; unmatched_case]);
+    let cases =
+      matched_case ::
+      if unmatched_case_needed matched_pat then [unmatched_case] else []
+    in
+    { pexp_desc = Pexp_match (match_expr, cases);
       pexp_loc = loc;
       pexp_attributes = [] }
   | _ ->
